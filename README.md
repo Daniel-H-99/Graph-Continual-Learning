@@ -1,9 +1,5 @@
 # GCL_pytorch
-
-
-### Implement TODO
-    
-    gcl.py includes TODOs
+models/gcl.py includes TODOs
 
 ### Run 
 
