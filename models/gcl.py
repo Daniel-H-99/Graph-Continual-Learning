@@ -143,6 +143,7 @@ class GCL(nn.Module):
         loss = target_loss.mean() + self.context_lambda * context_loss.mean() + self.graph_lambda * graph_loss 
         
         # TODO 2: Complete self.update_memory()
+        self.update_memory(target_images, target_labels, target_edges, context_edges, context_losses < current_losses)
         
 
         return {
@@ -251,7 +252,7 @@ class GCL(nn.Module):
             new_edges[np.ix_(old_indices, new_indices)] = context_edges[num_contexts:].T[np.ix_(old_indices, target_indices)].clone().detach()
             new_edges[np.ix_(new_indices, old_indices)] = context_edges[num_contexts:][np.ix_(target_indices, old_indices)].clone().detach()
             
-            # TODO 3: Update context to context that reached the lowest loss (from current batch's context_edges to new_edges) 
+            # TODO 2: Update context to context that reached the lowest loss (from current batch's context_edges to new_edges) 
             
         # Update newly added target to target edges
         new_edges[np.ix_(new_indices, new_indices)] = target_edges[np.ix_(target_indices, target_indices)].clone().detach()
