@@ -31,6 +31,7 @@ class GCL(nn.Module):
         self.context_temperature = context_temperature
         self.target_temperature = target_temperature
         self.args = args
+        self.hidden_size = hidden_size
 
         if in_channels == 1:
             self.image_encoder = nn.Sequential(nn.Linear(784, hidden_size), nn.ReLU(), nn.Linear(hidden_size, hidden_size))
@@ -117,12 +118,45 @@ class GCL(nn.Module):
         
         
         unnorm_graph = context_dists.rsample().sigmoid()
+        ### detereministic label ###
+        # unnorm_graph = (context_edges.sigmoid() > 0.5).long().float()
         unnorm_graph.data.fill_diagonal_(0.0) # 0 for diag(G)
         norm_graph = F.normalize(unnorm_graph, p=1, dim=1) # Normalized G and A
 
 
         # TODO 1: Create final embedding
+        # norm_graph: (n_c + n_t) x n_c
+        # image_embeddings: (n_c + n_t ) x d_h
+        # context_labels: n_c x num_classes
+
+        def build_one_hot_vectors(class_indice):
+          # class_indice: n_c
+          result = torch.zeros(len(class_indice), self.num_classes)
+          result[class_indice] = 1
+          return result
         
+
+        ### option: Add self loop for graph A ###
+        # label_embeddings = self.label_encoder(build_one_hot_vectors(context_labels).cuda()); # n_c x d_h
+        # context_classes = build_one_hot_vectors(context_labels).cuda()
+        # target_classes = torch.mm(norm_graph[num_contexts:], context_classes)
+        # classes = torch.cat([context_classes, target_classes], dim=0)
+        # label_embeddings = self.label_encoder(classes)
+        # context_label_embeddings, target_label_embeddings = label_embeddings.split([num_contexts, num_targets], dim=0)
+        # v_c = torch.cat([self.latent_mapping(context_embeddings), context_label_embeddings], dim=1) # n_c x 2 * d_h
+        # v_t = torch.cat([self.latent_mapping(target_embeddings), target_label_embeddings], dim=1)
+        # final_embeddings_c = torch.mm(norm_graph[:num_contexts], v_c) # (n_c + n_t) x 2 * d_h
+        # unnorm_graph_t = torch.cat([unnorm_graph[-num_targets:], torch.eye(num_targets).cuda()], dim=1)
+        # norm_graph_t = F.normalize(unnorm_graph_t, p=1, dim=1)
+        # final_embeddings_t = torch.mm(norm_graph_t, torch.cat([v_c, v_t], dim=0))
+        # final_embeddings = torch.cat([final_embeddings_c, final_embeddings_t], dim=0)
+        # logits = self.output_mapping(final_embeddings); # (n_c + n_t) x num_classes
+        # context_logits, target_logits = logits.split([num_contexts, num_targets], dim=0)
+        
+        v_c = torch.cat([self.latent_mapping(context_embeddings), self.label_encoder(build_one_hot_vectors(context_labels).cuda())], dim=1)
+        final_embeddings = torch.mm(norm_graph, v_c)
+        logits = self.output_mapping(final_embeddings); # (n_c + n_t) x num_classes
+        context_logits, target_logits = logits.split([num_contexts, num_targets], dim=0)
 
         context_loss = F.cross_entropy(input=context_logits, target=context_labels, reduction="none")
         target_loss = F.cross_entropy(input=target_logits, target=target_labels, reduction="none")
@@ -253,7 +287,9 @@ class GCL(nn.Module):
             new_edges[np.ix_(new_indices, old_indices)] = context_edges[num_contexts:][np.ix_(target_indices, old_indices)].clone().detach()
             
             # TODO 2: Update context to context that reached the lowest loss (from current batch's context_edges to new_edges) 
-            
+            assert context_masks is not None
+            context_masks_2d = torch.from_numpy(context_masks[old_indices]).cuda().unsqueeze(1).expand(-1, len(old_indices))
+            new_edges[np.ix_(old_indices, old_indices)] = torch.where(context_masks_2d, context_edges[np.ix_(old_indices, old_indices)].clone().detach(), self.context_edges[np.ix_(old_indices, old_indices)].clone().detach())
         # Update newly added target to target edges
         new_edges[np.ix_(new_indices, new_indices)] = target_edges[np.ix_(target_indices, target_indices)].clone().detach()
         self.context_edges = new_edges
